@@ -5,12 +5,12 @@ import pyBigWig
 
 # ——— 1. read original gene pairs ———
 df = pd.read_csv(
-    "/data/yangchangbo/ZSQ/HCLRs/xgboost_species_TF_cor_phastCons100_30_HCLR.txt",
+    "xgboost_species_TF_cor_phastCons100_30_HCLR.txt",
     sep="\t", dtype=str
 )
 
 # ——— 2. GTF:gene→(chr,start,end)  ———
-gtf = "/data/yangchangbo/ZSQ/HCLRs/gencode.v48.annotation.gtf"
+gtf = "gencode.v48.annotation.gtf"
 gene_coords = {}
 with open(gtf) as f:
     for ln in f:
@@ -29,7 +29,7 @@ with open(gtf) as f:
         gene_coords[name] = (chrom, start, end)
 
 # ——— 3.  bigWig to get Mean_LECIF for genes ———
-bw = pyBigWig.open("/data/yangchangbo/ZSQ/HCLRs/hg38.LECIFv1.1.bw")
+bw = pyBigWig.open("hg38.LECIFv1.1.bw")
 
 def get_lecif(gene):
     # 1. check if gene has coordinates
@@ -64,4 +64,5 @@ df['source_LECIF'] = df['source'].apply(get_lecif)
 # ——— 5. write new file ———
 out = "/data/yangchangbo/ZSQ/HCLRs/xgboost_species_TF_cor_phastCons100_30_LECIF_HCLR.txt"
 df.to_csv(out, sep='\t', index=False)
+
 print("Wrote:", out)
