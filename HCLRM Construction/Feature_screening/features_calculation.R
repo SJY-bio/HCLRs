@@ -1,5 +1,4 @@
 ##### OmniPath #####
-setwd(dir = "D:/ATAC/HCLRs/OmniPath")
 library(data.table)
 LR <- data.frame()
 for (i in 1:length(dir())) {
@@ -9,18 +8,15 @@ for (i in 1:length(dir())) {
 LR <- unique(LR)
 Ligand <- data.frame(Ligand = unique(LR$source))
 Recepter <- data.frame(Recepter = unique(LR$target))
-fwrite(Ligand,file = "D:/ATAC/HCLRs/Ligand_unique.txt",quote = F,sep = "\t",col.names = F)
-fwrite(Recepter,file = "D:/ATAC/HCLRs/Recepter_unique.txt",quote = F,sep = "\t",col.names = F)
+fwrite(Ligand,file = "Ligand_unique.txt",quote = F,sep = "\t",col.names = F)
+fwrite(Recepter,file = "Recepter_unique.txt",quote = F,sep = "\t",col.names = F)
 
-
-
-
-xgboost <- fread("D:\\ATAC\\HCLRs\\xgboost_confidence_LR_01_8777.txt",header = T,sep = "\t")
+xgboost <- fread("xgboost_confidence.txt",header = T,sep = "\t")
 
 ##### CellChatDB_conservatism_3species #####
-load("D:/ATAC/HCLRs/Species/CellChatDB.human.rda")
-load("D:/ATAC/HCLRs/Species/CellChatDB.mouse.rda")
-load("D:/ATAC/HCLRs/Species/CellChatDB.zebrafish.rda")
+load("CellChatDB.human.rda")
+load("CellChatDB.mouse.rda")
+load("CellChatDB.zebrafish.rda")
 human <- CellChatDB.human$interaction
 mouse <- CellChatDB.mouse$interaction
 zebrafish <- CellChatDB.zebrafish$interaction
@@ -34,30 +30,30 @@ xgboost$Interspecies_conservatism <- 0
 xgboost[which(xgboost$pair %in% inter_species),"Interspecies_conservatism"] <- 1
 
 ##### KEGG_TF_class #####
-KEGG <- fread("D:/ATAC/HCLRs/all_axis_filter_out.csv",header = T,sep = ",")[,1:3]
+KEGG <- fread("all_axis_filter_out.csv",header = T,sep = ",")[,1:3]
 KEGG$pair <- paste0(KEGG$Ligand_Symbol,"--",KEGG$Receptor_Symbol)
 KEGG <- unique(KEGG[,c("pair","TF_Symbol")])
 library(dplyr)
 KEGG_simplified <- KEGG %>%
   group_by(pair) %>%
   summarise(
-    TF_list = paste(unique(TF_Symbol), collapse = ";"),  # 把所有下游 TF 用分号串起来
-    KEGG_TF_count = n_distinct(TF_Symbol)                     # 计算每对有多少个不同的TF
+    TF_list = paste(unique(TF_Symbol), collapse = ";"),  
+    KEGG_TF_count = n_distinct(TF_Symbol)                    
   ) %>% ungroup()
 KEGG_simplified$KEGG_TF_class <- 1
 xgboost <- merge(xgboost,KEGG_simplified[,c(1,3,4)],by = "pair",all.x = T)
 xgboost[is.na(xgboost$KEGG_TF_class),"KEGG_TF_class"] <- 0
 xgboost[is.na(xgboost$KEGG_TF_count),"KEGG_TF_count"] <- 0
 
-cellcall <- fread("D:/ATAC/HCLRs/new_ligand_receptor_TFs.txt",header = T,sep = "\t")[,6:8]
+cellcall <- fread("new_ligand_receptor_TFs.txt",header = T,sep = "\t")[,6:8]
 cellcall$pair <- paste0(cellcall$Ligand_Symbol,"--",cellcall$Receptor_Symbol)
 cellcall <- unique(cellcall[,c("pair","TF_Symbol")])
 library(dplyr)
 cellcall_simplified <- cellcall %>%
   group_by(pair) %>%
   summarise(
-    TF_list = paste(unique(TF_Symbol), collapse = ";"),  # 把所有下游 TF 用分号串起来
-    cellcall_TF_count = n_distinct(TF_Symbol)                     # 计算每对有多少个不同的TF
+    TF_list = paste(unique(TF_Symbol), collapse = ";"),  
+    cellcall_TF_count = n_distinct(TF_Symbol)             
   ) %>% ungroup()
 cellcall_simplified$cellcall_TF_class <- 1
 xgboost <- merge(xgboost,cellcall_simplified[,c(1,3,4)],by = "pair",all.x = T)
@@ -70,12 +66,12 @@ library(cmapR)
 my_ds = parse_gctx("D:/ATAC/HCLRs/GTEx_Analysis_2022-06-06_v10_RNASeQCv2.4.2_gene_tpm_non_lcm.gct")
 exp <- my_ds@mat
 
-# 转换行名
+
 library(biomaRt)
-# a) 去掉行名里的版本号
+
 ens_ids <- rownames(exp)
 ens_stripped <- sub("\\..*$", "", ens_ids)  
-# b) 从 Ensembl BioMart 拉基因名
+
 mart <- useMart("ensembl", dataset="hsapiens_gene_ensembl")
 mapping <- getBM(
   attributes = c("ensembl_gene_id", "hgnc_symbol"),
@@ -83,19 +79,14 @@ mapping <- getBM(
   values     = unique(ens_stripped),
   mart       = mart
 )
-# 去掉没有对应 symbol 的
+
 mapping <- mapping[mapping$hgnc_symbol != "", ]
-# c) 构建一个从原行名 → symbol 的向量
-#    注意如果一个 ENSEMBL 对应多个 symbol，这里只取第一个
 mapping <- mapping[!duplicated(mapping$ensembl_gene_id), ]
 emap <- setNames(mapping$hgnc_symbol, mapping$ensembl_gene_id)
-# d) 筛选 exp，只保留映射成功的行，并把行名换成 symbol
+
 keep      <- ens_stripped %in% names(emap)
 exp2  <- exp[keep, , drop=FALSE]
 rownames(exp2) <- emap[ ens_stripped[keep] ]
-
-# 按行（基因）做 median‑centered zscore 标准化 ----
-#    Z_ij = ( log2(TPM_ij+1) - median(log2(TPM_i+1)) ) / sd(log2(TPM_i+1))
 log2_mat <- log2(exp2 + 1)
 z_mat <- t(apply(log2_mat, 1, function(g) {
   (g - median(g)) / sd(g)
@@ -110,12 +101,12 @@ xgboost$Cor <- mapply(function(lig, rec) {
 }, xgboost$source, xgboost$target)
 rm(exp,exp2,log2_mat,mapping,mart,my_ds)
 
-fwrite(xgboost,"D:\\ATAC\\HCLRs\\xgboost_species_TF_cor_HCLR.txt",quote = F,sep = "\t")
+fwrite(xgboost,"xgboost_species_TF_cor_HCLR.txt",quote = F,sep = "\t")
 
 
 ##### phastCons100_30 #####
 library(data.table)
-xgboost <- fread("D:\\ATAC\\HCLRs\\xgboost_species_TF_cor_phastCons100_HCLR.txt",header = T,sep = "\t")
+xgboost <- fread("xgboost_species_TF_cor_phastCons100_HCLR.txt",header = T,sep = "\t")
 library(GenomicRanges)
 library(TxDb.Hsapiens.UCSC.hg38.knownGene)
 library(phastCons30way.UCSC.hg38)#phastCons100way.UCSC.hg38
@@ -164,11 +155,11 @@ xgboost$target_phastCons30 <- phastCons_vector[xgboost$target]
 fwrite(xgboost,"D:\\ATAC\\HCLRs\\xgboost_species_TF_cor_phastCons100_30_HCLR.txt",quote = F,sep = "\t")
 
 ##### LECIF #####
-aaa <- fread("D:\\ATAC\\HCLRs\\xgboost_species_TF_cor_phastCons100_30_LECIF_HCLR.txt",sep = "\t",header = T)
+aaa <- fread("xgboost_species_TF_cor_phastCons100_30_LECIF_HCLR.txt",sep = "\t",header = T)
 
 ##### CellChat_2species_conservatism #####
-load("D:/ATAC/HCLRs/Species/CellChatDB.human.rda")
-load("D:/ATAC/HCLRs/Species/CellChatDB.mouse.rda")
+load("CellChatDB.human.rda")
+load("CellChatDB.mouse.rda")
 human <- CellChatDB.human$interaction
 mouse <- CellChatDB.mouse$interaction
 inter_species <- human[which(human$interaction_name%in%intersect(human$interaction_name,mouse$interaction_name)),]
@@ -179,7 +170,7 @@ inter_species <- inter_species$interaction_name
 
 aaa$CellChat_2species_conservatism <- 0
 aaa[which(aaa$pair %in% inter_species),"CellChat_2species_conservatism"] <- 1
-fwrite(aaa,"D:\\ATAC\\HCLRs\\xgboost_2+3species_TF_cor_phastCons100_30_LECIF_HCLR.txt",quote = F,sep = "\t")
+fwrite(aaa,"xgboost_2+3species_TF_cor_phastCons100_30_LECIF_HCLR.txt",quote = F,sep = "\t")
 
 
 
@@ -190,14 +181,14 @@ library(ggplot2)
 library(ggpubr)
 library(tidyr)
 
-feat <- fread("D:\\ATAC\\HCLRs\\xgboost-model\\Features-revise\\xgboost_2+3species_TF_cor_phastCons100_30_LECIF_HCLR.txt")[,c(1:8,23,13,16,21,22)]
+feat <- fread("xgboost_2+3species_TF_cor_phastCons100_30_LECIF_HCLR.txt")[,c(1:8,23,13,16,21,22)]
 feat$target_LECIF[is.na(feat$target_LECIF)] <- 0
 feat$source_LECIF[is.na(feat$source_LECIF)] <- 0
 feat$LR_LECIF_min <- pmin(feat$target_LECIF,feat$source_LECIF) 
 feat$LR_LECIF_sqmean <- sqrt(feat$target_LECIF * feat$source_LECIF)
 feat$LR_LECIF_mean <- (feat$target_LECIF + feat$source_LECIF)/2
 
-CITE_TICCOM <- fread("D:/ATAC/HCLRs/xgboost-model/code_used_data/dabiao_CITE_TICCOM_origin_195.txt",header = T,sep = "\t")[,c(1:3)]
+CITE_TICCOM <- fread("dabiao_CITE_TICCOM_origin_195.txt",header = T,sep = "\t")[,c(1:3)]
 colnames(CITE_TICCOM) <- colnames(feat)[1:3]
 
 
@@ -334,6 +325,7 @@ for (col in new_binary) {
   
   print(p_bin)
 }
+
 
 
 
