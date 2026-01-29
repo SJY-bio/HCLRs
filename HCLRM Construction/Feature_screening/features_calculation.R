@@ -13,7 +13,7 @@ fwrite(Recepter,file = "Recepter_unique.txt",quote = F,sep = "\t",col.names = F)
 
 xgboost <- fread("xgboost_confidence.txt",header = T,sep = "\t")
 
-##### CellChatDB_conservatism_3species #####
+##### CellChatDB_conservatism #####
 load("CellChatDB.human.rda")
 load("CellChatDB.mouse.rda")
 load("CellChatDB.zebrafish.rda")
@@ -325,6 +325,7 @@ for (col in new_binary) {
   
   print(p_bin)
 }
+
 
 
 
