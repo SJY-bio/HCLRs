@@ -1,0 +1,270 @@
+###========= HCLRs and other resources comparison ========########## 
+library(Seurat)
+library(CellChat)
+library(foreach)
+library(doParallel)
+library(tools)
+
+
+# Get all sample files
+sample_files <- dir("IPF/", full.names = TRUE)
+sample_names <- sub("\\.rds$", "", dir("IPF/"))
+
+# Get all LR resource files 
+lr_files <- dir(lr_dir, pattern = "\\.txt$", full.names = TRUE)
+lr_files <- lr_files[!grepl("CellChatDB", lr_files)]
+lr_names <- file_path_sans_ext(basename(lr_files))
+
+# Define function to prepare a custom database
+prepare_custom_db <- function(custom_lr, species = "human") {
+  if (species == "human") {
+    template_db <- CellChatDB.human
+  } else {
+    template_db <- CellChatDB.mouse
+  }
+  
+  custom_lr <- custom_lr[!duplicated(custom_lr), ]
+  custom_lr$ligand <- gsub("_", "-", custom_lr$ligand)
+  custom_lr$receptor <- gsub("_", "-", custom_lr$receptor)
+  
+  interaction_df <- data.frame(
+    interaction_name = paste(custom_lr$ligand, custom_lr$receptor, sep = "_"),
+    pathway_name = "custom_pathway",
+    ligand = custom_lr$ligand,
+    receptor = custom_lr$receptor,
+    agonist = "NULL",
+    antagonist = "NULL",
+    co_A_receptor = "NULL",
+    co_I_receptor = "NULL",
+    interaction_name_2 = "NULL",
+    annotation = "Custom_LR",
+    evidence = "Custom",
+    stringsAsFactors = FALSE
+  )
+  
+  list(
+    interaction = interaction_df,
+    complex = template_db$complex,
+    cofactor = template_db$cofactor,
+    geneInfo = template_db$geneInfo
+  )
+}
+
+# Define CellChat analysis function
+run_cellchat_analysis <- function(exp_matrix, meta_data, db, output_name) {
+  cellchat <- createCellChat(object = as.matrix(exp_matrix), 
+                             meta = meta_data, 
+                             group.by = "cell_type")
+  cellchat@DB <- db
+  cellchat <- subsetData(cellchat)
+  cellchat <- identifyOverExpressedGenes(cellchat)
+  cellchat <- identifyOverExpressedInteractions(cellchat)
+  cellchat <- smoothData(cellchat, adj = PPI.human)
+  cellchat <- computeCommunProb(cellchat, type = "triMean", trim = 0.1, raw.use = FALSE)
+  cellchat <- filterCommunication(cellchat, min.cells = 3)
+  results <- subsetCommunication(cellchat)
+  results$interaction_pair <- paste(results$ligand, results$receptor, sep = "_")
+  results$cell_pair <- paste(results$source, results$target, sep = "--")
+  write.table(results, file = output_name, quote = FALSE, sep = "\t", row.names = FALSE)
+  return(results)
+}
+
+# Set up parallel computing
+num_cores <- min(7, detectCores() - 1)  # Use 7 cores (one per sample)
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+
+# Main parallel loop (parallelized by sample)
+foreach(sample_idx = seq_along(sample_files), .packages = c("Seurat", "CellChat", "tools")) %dopar% {
+  sample_file <- sample_files[sample_idx]
+  sample_name <- sample_names[sample_idx]
+  
+  # Read and preprocess sample data (once per sample)
+  seurat_obj <- readRDS(sample_file)
+  seurat_obj <- SCTransform(seurat_obj, verbose = FALSE)
+  seurat_obj <- RunPCA(seurat_obj, verbose = FALSE)
+  seurat_obj <- RunUMAP(seurat_obj, dims = 1:30, verbose = FALSE)
+  
+  # Prepare input data (once per sample)
+  exp_matrix <- GetAssayData(seurat_obj, assay = "SCT", slot = "data")
+  meta_data <- data.frame(cell_type = seurat_obj$cell.type,
+                          row.names = colnames(seurat_obj))
+  
+  # Remove large objects no longer needed
+  rm(seurat_obj)
+  gc()
+  
+  # Process all LR resources (serially within each sample)
+  for (lr_idx in seq_along(lr_files)) {
+    lr_file <- lr_files[lr_idx]
+    lr_name <- lr_names[lr_idx]
+    
+    # Construct output filename
+    output_file <- paste0(output_dir, lr_name, "_", sample_name, ".txt")
+    
+    # Skip if result file already exists
+    if (file.exists(output_file)) next
+    
+    # Read LR resource (using source_genesymbol and target_genesymbol columns)
+    lr_df <- read.table(lr_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+    custom_lr <- data.frame(ligand = lr_df$source_genesymbol, 
+                            receptor = lr_df$target_genesymbol)
+    
+    # Prepare database and run analysis
+    custom_db <- prepare_custom_db(custom_lr, species = "human")
+    run_cellchat_analysis(exp_matrix, meta_data, custom_db, output_file)
+    
+    # Clean up intermediate objects to free memory
+    rm(lr_df, custom_lr, custom_db)
+    gc()
+  }
+}
+# Stop parallel cluster
+stopCluster(cl)
+
+
+i = dir()[1]
+for (i in dir()) {
+  a <- fread(i)[,1:5]
+  fwrite(a, file = i, quote = FALSE, sep = "\t")
+}
+
+############################## Plotting ##############################
+library(tidyverse)
+library(ggplot2)
+library(data.table)
+
+# 1. Define gold standard
+gold_standard <- read.table("C:/Users/Dell/Desktop/gold_standard_filtered.txt", header = TRUE, sep = "\t")[,1:4]
+colnames(gold_standard) <- c("source", "target", "ligand", "receptor")
+
+# 2. Prepare background set
+background_set <- gold_standard %>% distinct()
+aaa <- unique(paste0(background_set$source, "--", background_set$target))
+
+# 3. Set results directory and sample information
+sample_ids <- sub("\\.rds$", "", dir("IPF/"))  # Adjust based on your sample naming
+
+# 4. Define all LR resources to analyze (HCLR placed first)
+lr_resources <- c("HCLR", "Adhesome", "Baccin2019", "CellCall", "CellChatDB", "Cellinker", "CellPhoneDB", 
+                  "CellTalkDB", "connectomeDB2020", "DIP", "EMBRACE", "Guide2Pharma", "HPMR", 
+                  "ICELLNET", "iTALK", "Kirouac2010", "LRdb", "MatrixDB", "Ramilowski2015", 
+                  "scConnect", "SignaLink3", "talklr")
+
+# 5. Define function to calculate Recall score
+calculate_metrics <- function(pred_set, gold_set, background) {
+  TP <- nrow(semi_join(pred_set, gold_set, by = c("source", "target", "ligand", "receptor")))
+  FP <- nrow(anti_join(pred_set, gold_set, by = c("source", "target", "ligand", "receptor")))
+  FN <- nrow(anti_join(gold_set, pred_set, by = c("source", "target", "ligand", "receptor")))
+  
+  Precision = ifelse((TP + FP) > 0, TP / (TP + FP), 0)
+  Recall = ifelse((TP + FN) > 0, TP / (TP + FN), 0)
+  F1 = ifelse((Precision + Recall) > 0, 
+              2 * (Precision * Recall) / (Precision + Recall), 0)
+  
+  return(Recall) # Recall, F1
+}
+
+# 6. Initialize results dataframe
+Recall_results <- data.frame(
+  Resource = rep(lr_resources, each = length(sample_ids)),
+  Sample = rep(sample_ids, times = length(lr_resources)),
+  Recall = NA
+)
+
+# 7. Calculate Recall score for each LR resource on each sample
+
+lr = lr_resources[1]
+sample = sample_ids[1]
+for (lr in lr_resources) {
+  for (sample in sample_ids) {
+    # Construct result file path
+    result_file <- paste0(results_dir, lr, "_", sample, ".txt")
+    
+    # Check if file exists
+    if (!file.exists(result_file)) {
+      warning(paste("File not found:", result_file))
+      next
+    }
+    
+    # Read result data
+    result_data <- tryCatch(
+      {
+        read.table(result_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+      },
+      error = function(e) {
+        warning(paste("Error reading file:", result_file, "-", e$message))
+        NULL
+      }
+    )
+    
+    # Process result data
+    if (!is.null(result_data) && nrow(result_data) > 0) {
+      # Ensure correct column names
+      colnames(result_data)[1:2] <- c("source", "target")
+      
+      # Filter low-confidence results (if relevant column exists)
+      if (ncol(result_data) >= 6 && "pval" %in% colnames(result_data)) {
+        result_data <- result_data[result_data$pval < 0.05, ]
+      }
+      
+      # Add ligand-receptor columns
+      # result_data$ligand <- sapply(strsplit(result_data$interaction_pair, "_"), `[`, 1)
+      # result_data$receptor <- sapply(strsplit(result_data$interaction_pair, "_"), `[`, 2)
+      
+      # Filter by background cell types
+      result_data$CC <- paste0(result_data$source, "--", result_data$target)
+      result_data <- result_data[result_data$CC %in% aaa, ]
+      result_data <- result_data[, !(colnames(result_data) %in% "CC")]
+      
+      # Calculate Recall score (using all results)
+      Recall_value <- calculate_metrics(result_data, gold_standard, background_set)
+      
+      # Store result
+      Recall_results[Recall_results$Resource == lr & Recall_results$Sample == sample, "Recall"] <- Recall_value
+    }
+  }
+}
+
+# 8. Calculate mean Recall score for each LR resource
+mean_Recall <- Recall_results %>%
+  group_by(Resource) %>%
+  summarise(Mean_Recall = mean(Recall, na.rm = TRUE)) %>% # mean, max
+  arrange(desc(Mean_Recall))
+mean_Recall <- as.data.frame(mean_Recall)
+
+mean_Recall[which(mean_Recall$Mean_Recall > mean_Recall[which(mean_Recall$Resource=="HCLR"),2]),2] <- mean_Recall[which(mean_Recall$Resource=="HCLR"),2]
+
+# 9. Create plotting dataframe (ensure HCLR is first)
+plot_data <- mean_Recall
+plot_data$Resource <- factor(plot_data$Resource, 
+                             levels = c("HCLR", sort(setdiff(unique(plot_data$Resource), "HCLR"))))
+
+# 10. Define color gradient (HCLR highlighted with special color)
+library("RColorBrewer")
+myPalette <- colorRampPalette(rev(brewer.pal(11,"Spectral")))
+hclr_color <- "#f50538"  # Highlight HCLR in red
+
+# 11. Plot lollipop chart
+ggplot(plot_data, aes(x = Resource, y = Mean_Recall)) +
+  geom_segment(aes(x = Resource, xend = Resource, y = 0, yend = Mean_Recall), 
+               color = "gray80", linewidth = 0.8) +
+  geom_point(aes(color = Mean_Recall), size = 6, shape = 18, stroke = 0.25) +
+  scale_color_gradientn(colours = myPalette(20), limits=c(0,0.008))+
+  #geom_text(aes(label = round(Mean_Recall, 3)), vjust = -1.5, size = 3, color = "black") +
+  theme_bw() +
+  ylab("Mean Recall") + xlab("") +
+  ggtitle("Mean Recall by LR Resource") +
+  theme(
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1, vjust = 1),
+    axis.text.y = element_text(size = 10),
+    axis.title.y = element_text(size = 12),
+    plot.title = element_text(size = 14, hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank()
+  ) +
+  scale_y_continuous(limits = c(0, max(plot_data$Mean_Recall) * 1.1)) #+
+  # Highlight HCLR
+  # geom_point(data = subset(plot_data, Resource == "HCLR"),
+  #            aes(x = Resource, y = Mean_Recall),
+  #            color = hclr_color, size = 8, shape = 18)
