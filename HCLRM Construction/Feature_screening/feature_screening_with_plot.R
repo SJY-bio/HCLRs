@@ -6,15 +6,15 @@ library(pROC)
 library(ggplot2)
 library(xgboost)
 
-dabiao2 <- read.table("D:/ATAC/HCLRs/xgboost-model/Features-revise/xgboost_2+3species_TF_cor_phastCons100_30_LECIF_HCLR.txt",sep = "\t",header = T)[,c(1:8,23,13,16,21,22,9)]
+dabiao2 <- read.table("xgboost_2+3species_TF_cor_phastCons100_30_LECIF_HCLR.txt",sep = "\t",header = T)[,c(1:8,23,13,16,21,22,9)]
 dabiao2$target_LECIF[is.na(dabiao2$target_LECIF)] <- 0
 dabiao2$source_LECIF[is.na(dabiao2$source_LECIF)] <- 0
 dabiao2$LR_LECIF_min <- pmin(dabiao2$target_LECIF,dabiao2$source_LECIF) 
 dabiao2$LR_LECIF_sqmean <- sqrt(dabiao2$target_LECIF * dabiao2$source_LECIF)
 dabiao2$LR_LECIF_mean <- (dabiao2$target_LECIF + dabiao2$source_LECIF)/2
 dabiao2 <- dabiao2[,c(1:13,15:17,14)]
-positive <- read.table("D:/ATAC/HCLRs/xgboost-model/code_used_data/dabiao_CITE_TICCOM_origin_195.txt",stringsAsFactors = F,header = T,sep = "\t")[,1]
-negative_final <- read.table("D:/ATAC/HCLRs/xgboost-model/code_used_data/negative1137_GO_filter_negative492.txt",stringsAsFactors = F,sep = "\t",header = T)
+positive <- read.table("dabiao_CITE_TICCOM_origin_195.txt",stringsAsFactors = F,header = T,sep = "\t")[,1]
+negative_final <- read.table("negative1137_GO_filter_negative492.txt",stringsAsFactors = F,sep = "\t",header = T)
 
 negative <- negative_final$LR
 dabiao2$lable <- ifelse(dabiao2$pair %in% positive,1,
@@ -39,7 +39,7 @@ importance_matrix2 <- xgb.importance(model = xgb2)
 print(importance_matrix2)
 library(Ckmeans.1d.dp)
 
-pdf("D:\\ATAC\\HCLRs\\xgboost-model\\code_used_data\\xgb2_featuer_importance.pdf",height = 5,width = 6)
+pdf("xgb2_featuer_importance.pdf",height = 5,width = 6)
 xgb.ggplot.importance(importance_matrix2)
 dev.off()
 
@@ -57,23 +57,21 @@ xgb2_ROC <- roc(response = traindata23$label,
                 predictor = cv.res$pred,
                 levels=c(0, 1))
 
-# save(xgb2_ROC,file = "G:\\dabiao\\dabiao\\validate\\xgboost_final\\xgb2_ROC.Rdata")
 
 
-pdf("D:\\ATAC\\HCLRs\\xgboost-model\\code_used_data\\xgb2_ROC_sqmean_0.981_8feature.pdf",width = 6,height = 5)
 ggroc(xgb2_ROC,
       color="#CC5500",
       size=1.5,
-      legacy.axes = F # FALSE时 横坐标为1-0 specificity；TRUE时 横坐标为0-1 1-specificity
+      legacy.axes = F 
 )+
-  theme_bw()+##背景空白
-  geom_segment(aes(x = 1, y = 0, xend = 0, yend = 1),        # 绘制对角线
+  theme_bw()+
+  geom_segment(aes(x = 1, y = 0, xend = 0, yend = 1),        
                colour='grey', 
                linetype = 'dotdash'
   ) +
   
-  #geom_point(aes(x = cutOffPoint[[2]],y = cutOffPoint[[3]]))+ # 绘制临界点/阈值
-  #geom_text(aes(x = cutOffPoint[[2]],y = cutOffPoint[[3]],label=cutOffPointText),vjust=-1)+ # 添加临界点/阈值文字标签
+  #geom_point(aes(x = cutOffPoint[[2]],y = cutOffPoint[[3]]))+ 
+  #geom_text(aes(x = cutOffPoint[[2]],y = cutOffPoint[[3]],label=cutOffPointText),vjust=-1)+ 
   annotate("text",x=0.6,y=0.7,label=paste("AUC = ", round(xgb2_ROC$auc,3)))
 
 dev.off()
@@ -87,9 +85,9 @@ library(Matrix)
 library(pROC)
 library(ggplot2)
 library(paletteer)
-# 原始数据准备
-# dabiao3_feature <- dabiao3[, c(4:11,15)]  # 9个特征
-dabiao3_feature <- dabiao3[,c(4:8,10:11,15)]  # 8个特征
+
+# dabiao3_feature <- dabiao3[, c(4:11,15)]  
+dabiao3_feature <- dabiao3[,c(4:8,10:11,15)]  
 
 n_features <- ncol(dabiao3_feature)
 
@@ -217,7 +215,7 @@ all_feature_AUC_mean <- all_feature_AUC %>%
   arrange(desc(Mean_AUC))
 
 aa <- ggplot(all_feature_AUC,aes(x=Feature,y=AUC,fill=Feature))+
-  geom_boxplot(alpha=0.8,color="#808180",fatten=0.8,lwd=0.3,width=0.5)+###fatten调整箱子中线宽度 lwd调整箱子轮廓线宽度
+  geom_boxplot(alpha=0.8,color="#808180",fatten=0.8,lwd=0.3,width=0.5)+
   geom_hline(yintercept = 0.98,colour="#CC5500",linetype=2,linewidth=2)+
   scale_fill_manual(values =c("#374E55","#DF8F44","#00A1D5","#B24745","#79AF97","#6A6599","#80796B"))+###人工定义颜色，color为向量
   theme_bw()+
@@ -225,7 +223,7 @@ aa <- ggplot(all_feature_AUC,aes(x=Feature,y=AUC,fill=Feature))+
         axis.text.y=element_text(size=12,face="plain"),
         axis.title.y=element_text(size = 16,face="plain"),
         legend.position="none")+
-  ylab("AUC")+xlab("") #设置x轴和y轴的标题
+  ylab("AUC")+xlab("") 
 aa
 
 ggsave(aa,file="D:/ATAC/HCLRs/xgboost-model/ROC/boxplot_1-7feature.pdf",width = 8,height = 4)
@@ -369,19 +367,19 @@ F2$scale_F1 <- scale(F2$F1)
 library("RColorBrewer")
 myPalette <- colorRampPalette(rev(brewer.pal(11,"Spectral")))
 F1_22resource <- ggplot(F2,aes(resource,F1))+
-  #geom_col(fill = "#BAB0AC", width = 0.1) + # 注意将width宽度设小
+  #geom_col(fill = "#BAB0AC", width = 0.1) + 
   geom_path(group=1, color = 'gray', lwd = 0.3)+
   geom_point(aes(color=F1),size=6,shape=18,stroke = 0.25)+
-  #scale_colour_manual(values =myPalette(20))+##离散变量,给边框加颜色
-  scale_color_gradientn(colours = myPalette(20), limits=c(0.5,1))+###设置填充颜色
-  theme_bw()+##背景空白
+  #scale_colour_manual(values =myPalette(20))+
+  scale_color_gradientn(colours = myPalette(20), limits=c(0.5,1))+
+  theme_bw()+
   ylab("F1 score")+xlab("")+
   theme(axis.text.x = element_text(size = 12,angle =30,hjust=0.75,vjust=0.85),
         axis.text.y = element_text(size = 12),
         axis.title.y = element_text(size = 15))+
-  scale_x_discrete(limits=as.character(F2$resource))##改变坐标轴顺序
+  scale_x_discrete(limits=as.character(F2$resource))
 
-ggsave(F1_22resource,file = "D:/ATAC/HCLRs/xgboost-model/敲定/resource_22_F1_score_new.pdf",width=8,height = 3)
+
 
 
 
@@ -571,3 +569,4 @@ lrnum <- ggplot(resource22_percent,aes(x=resource,y=LRnum))+
 ggsave(lrnum,filename = "D:\\ATAC\\HCLRs\\repair\\HCLRs_21sources_LRnum_prop.pdf",width =8,height = 3)
 
 write.table(resource22_percent,"G:\\dabiao\\dabiao\\aaaresult_figures\\Result2\\aaresource22_union_fenbu_proportion\\HCLRs_21sources_LRnum_2prop.txt",sep = "\t",col.names = T,row.names = F,quote = F)
+
